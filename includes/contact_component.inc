@@ -507,7 +507,7 @@ function _webform_csv_data_civicrm_contact($component, $export_options, $value) 
  *
  * @return array
  */
-function wf_crm_contact_search($node, $component, $params, $str = NULL) {
+function wf_crm_contact_search_old($node, $component, $params, $str = NULL) {
   if (empty($node->webform_civicrm)) {
     return array();
   }
@@ -521,7 +521,13 @@ function wf_crm_contact_search($node, $component, $params, $str = NULL) {
   if ($str) {
     $params['display_name'] = str_replace(' ', '%', CRM_Utils_Type::escape($str, 'String'));
   }
+  
+  
+  
   $result = wf_civicrm_api('contact', 'get', $params);
+  //CRM_Core_Error::debug_log_message( "result is: ".print_r($result, TRUE) );
+  
+  
   // Autocomplete results
   if ($str) {
     foreach (wf_crm_aval($result, 'values', array()) as $contact) {
@@ -565,6 +571,92 @@ function wf_crm_contact_search($node, $component, $params, $str = NULL) {
   }
   return $ret;
 }
+
+/**
+ * Returns a list of contacts based on component settings.
+ *
+ * @param $node
+ *   Node object
+ * @param $component
+ *   Webform component
+ * @param $params
+ *   Contact get params (filters)
+ * @param $str
+ *   Search string (used during autocomplete)
+ *
+ * @return array
+ */
+function wf_crm_contact_search($node, $component, $params, $str = NULL) {
+  if (empty($node->webform_civicrm)) {
+    return array();
+  }
+  $limit = $str ? 12 : 500;
+  $ret = array();
+  $display = $component['extra']['results_display'];
+  $params += array(
+    'rowCount' => $limit,
+    'sort' => 'external_identifier',
+  );
+  
+ 
+  
+  if ($str) {
+    $params['external_identifier'] = str_replace(' ', '%', CRM_Utils_Type::escape($str, 'String'));
+	$params['external_identifier'] = $str."%";
+  }
+  
+     
+  $result = wf_civicrm_api('contact', 'get', $params);
+     
+  // Autocomplete results
+  if ($str) {
+    foreach (wf_crm_aval($result, 'values', array()) as $contact) {
+	  if ($name = wf_crm_format_contact($contact, $display)) {
+		if (!empty($contact['external_identifier'])) {
+		    $name = $contact['external_identifier'];
+		}
+	    $ret[] = array('id' => $contact['id'], 'name' => $name);
+      }
+    }
+    if (count($ret) < $limit && $component['extra']['allow_create']) {
+      // HTML hack to get prompt to show up different than search results
+      $ret[] = array('id' => "-$str", 'name' => '<em><i>' . $component['extra']['none_prompt'] . '</i></em>');
+    }
+  }
+  // Select results
+  else {
+    if ($component['extra']['allow_create']) {
+      $ret['-'] = $component['extra']['none_prompt'];
+    }
+    foreach (wf_crm_aval($result, 'values', array()) as $contact) {
+      if ($name = wf_crm_format_contact($contact, $display)) {
+        $ret[$contact['id']] = $name;
+      }
+    }
+    // If we get exactly $limit results, there are probably more - warn that the list is truncated
+    if (wf_crm_aval($result, 'count') >= $limit) {
+      watchdog(
+        'webform_civicrm',
+        'Maximum contacts exceeded, list truncated on the webform "@title". The webform_civicrm "@field" field cannot display more than !limit contacts because it is a select list. Recommend switching to autocomplete widget in component settings.',
+        array('!limit' => $limit, '@field' => $component['name'], '@title' => $node->title),
+        WATCHDOG_WARNING,
+        l(t('Edit component'), "node/{$node->nid}/webform/components/{$component['cid']}")
+      );
+      if (wf_crm_admin_access($node) && node_is_page($node)) {
+        drupal_set_message(
+          '<strong>' . t('Maximum contacts exceeded, list truncated.') .'</strong><br>' .
+          t('The field "@field" cannot show more than !limit contacts because it is a select list. Recommend switching to autocomplete widget in <a !link>component settings</a>.',
+            array('!limit' => $limit, '@field' => $component['name'], '!link' => 'href="' . url("node/{$node->nid}/webform/components/{$component['cid']}") . '"')),
+          'warning'
+        );
+      }
+    }
+  }
+  return $ret;
+}
+
+
+
 
 /**
  * Load contact name if user has permission. Else return FALSE.
